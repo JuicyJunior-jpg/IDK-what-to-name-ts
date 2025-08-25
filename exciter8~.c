@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include <string.h>
 
+// forward declaration so pd_new() can see the class symbol
+static t_class *exciter8_tilde_class;
+
 /*
     exciter8~  — Universal 8‑knob stereo exciter for physical modelling
     Author: Juicy + ChatGPT
@@ -448,8 +451,6 @@ static void exciter8_tilde_free(t_exciter8_tilde *x){
 }
 
 // ------------------- setup -------------------
-t_class *exciter8_tilde_class;
-
 void exciter8_tilde_setup(void){
     exciter8_tilde_class = class_new(gensym("exciter8~"),
         (t_newmethod)exciter8_tilde_new,
