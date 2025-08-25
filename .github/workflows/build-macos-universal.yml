@@ -23,7 +23,8 @@ jobs:
           clang -O3 -std=c99 -DPD -I. \
             -arch x86_64 -arch arm64 \
             -mmacosx-version-min=10.13 \
-            -fPIC -shared exciter8~.c -o exciter8~.pd_darwin
+            -bundle -undefined dynamic_lookup \
+            exciter8~.c -o exciter8~.pd_darwin
 
       - name: Show file info
         run: |
