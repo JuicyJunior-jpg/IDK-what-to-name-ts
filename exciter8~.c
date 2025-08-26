@@ -30,6 +30,7 @@
 
 #define TWO_PI 6.28318530717958647692f
 #define LERP(a,b,t) ((a)+((b)-(a))*(t))
+#define CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
 
 static t_class *exciter8_tilde_class;
 
