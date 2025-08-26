@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <string.h>
 
+// forward declaration so pd_new() can see it
+static t_class *exciter8_tilde_class;
 /*
     exciter8~  — Universal 8-knob stereo exciter (MIDI-friendly version)
-    Author: Juicy + ChatGPT
+    Author: Juicy
     License: MIT
 
     Inlets (all float 0..1):
