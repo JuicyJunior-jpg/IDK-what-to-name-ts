@@ -18,13 +18,12 @@
       8  Click Amount (0..1)
       9  Env→Filter Depth (0..1)
 
-    Outlets:
-      L, R audio
+    Outlets: L, R audio
 
     Notes:
       • Envelope is velocity-aware (0..1). Harder velocity -> faster attack + higher peak.
       • No noise leak: when env==0 we hard-mute and reset filter states.
-      • Env→Filter has immediate feel: precompute LP(200 Hz)/Dry/HP(8 kHz) and crossfade per-sample.
+      • Env→Filter has immediate feel: LP(200 Hz)/Dry/HP(8 kHz) mixed per-sample by ADSR.
       • mode: impulse = Hann click; dc = short pressure burst.
 */
 
@@ -42,7 +41,6 @@ typedef struct _exciter8_tilde {
     t_float p_attack_ms, p_decay_ms, p_sustain, p_release_ms;
     t_float p_hardness, p_brightness, p_click, p_envfilt;
 
-    // sample rate
     float sr;
 
     // ADSR state
@@ -121,10 +119,9 @@ static inline float hp8k(float in, float *x1, float *y1, float sr){
 /* Map Brightness & EnvDepth to instantaneous mix weights (LP/Dry/HP) */
 static inline void compute_tilt_weights(float base_b, float env, float depth,
                                         float *w_lp, float *w_dry, float *w_hp){
-    // we want:
     // depth = 0   -> use base_b (0=LP, 0.5=neutral, 1=HP)
-    // depth = 0.5 -> sweep from 0.5 (neutral) at env=1 to 0.0 (LP) at env=0
-    // depth = 1   -> sweep from 1.0 (HP) at env=1 to 0.0 (LP) at env=0
+    // depth = 0.5 -> sweep neutral@env=1 -> LP@env=0
+    // depth = 1   -> sweep HP@env=1      -> LP@env=0
     float b_env_target;
     if (depth <= 0.5f){
         float d = depth * 2.f; // 0..1
@@ -187,7 +184,6 @@ static t_int *exciter8_tilde_perform(t_int *w){
             x->hp8k_x1 = 0.f; x->hp8k_y1 = 0.f;
             x->click_on = 0;
 
-            // pass zeros
             outL[i] = 0.f;
             outR[i] = 0.f;
             continue;
@@ -216,9 +212,9 @@ static t_int *exciter8_tilde_perform(t_int *w){
         float shaped = nonlin_morph(dry, x->p_hardness);
 
         /* precompute branches */
-        float lp_branch = lp200(shaped, &x->lp200_state, x->sr);
+        float lp_branch  = lp200(shaped, &x->lp200_state, x->sr);
         float dry_branch = shaped;
-        float hp_branch = hp8k(shaped, &x->hp8k_x1, &x->hp8k_y1, x->sr);
+        float hp_branch  = hp8k  (shaped, &x->hp8k_x1, &x->hp8k_y1, x->sr);
 
         /* compute instantaneous filter weights (Env→Filter depth) */
         float w_lp, w_dry, w_hp;
@@ -227,9 +223,9 @@ static t_int *exciter8_tilde_perform(t_int *w){
         /* immediate-feel tilt mix */
         float col = w_lp*lp_branch + w_dry*dry_branch + w_hp*hp_branch;
 
-        /* light stereo decorrelation (tiny, gated by env) */
-        float addL = 0.02f * white01(&x->rng) * (x->env_level>0.f);
-        float addR = 0.02f * white01(&x->rng) * (x->env_level>0.f);
+        /* light stereo decorrelation */
+        float addL = 0.02f * white01(&x->rng);
+        float addR = 0.02f * white01(&x->rng);
 
         /* DC block and gentle safety */
         float yL = dc_hp(col + addL, &x->dc_xL, &x->dc_yL, x->dc_a);
@@ -249,60 +245,4 @@ static void exciter8_tilde_dsp(t_exciter8_tilde *x, t_signal **sp){
 
 /* ---------- note events ---------- */
 static void exciter8_tilde_noteon(t_exciter8_tilde *x, t_floatarg vel){
-    float v = CLAMP(vel, 0.f, 1.f);
-    if (v <= 0.f){ return; }
-
-    x->note_vel = v;
-    x->env_peak = v;
-    x->env_state = 1;
-    x->env_level = 0.f;
-
-    // velocity speeds up attack; D/R independent (musical)
-    float atk_samps = fmaxf(1.f, (x->p_attack_ms * 0.001f * x->sr) / (0.25f + 0.75f * v));
-    float dec_samps = fmaxf(1.f,  x->p_decay_ms  * 0.001f * x->sr);
-    float rel_samps = fmaxf(1.f,  x->p_release_ms* 0.001f * x->sr);
-
-    x->env_a_inc = x->env_peak / atk_samps;
-    x->env_d_inc = (x->env_peak - x->p_sustain * x->env_peak) / dec_samps;
-    x->env_r_inc = (x->p_sustain * x->env_peak) / rel_samps;
-
-    // strike window ~3 ms, independent of ADSR times
-    x->click_inc   = 1.f / fmaxf(1.f, 3e-3f * x->sr);
-    x->click_phase = 0.f;
-    x->click_on    = (x->p_click > 0.001f);
-}
-
-static void exciter8_tilde_noteoff(t_exciter8_tilde *x){
-    if (x->env_state == 0) return;
-    x->env_state = 4;
-}
-
-/* ---------- other methods ---------- */
-static void exciter8_tilde_mode(t_exciter8_tilde *x, t_symbol *s){
-    if (!s) return;
-    if (strcmp(s->s_name, "impulse") == 0) x->exc_mode = 0;
-    else if (strcmp(s->s_name, "dc") == 0) x->exc_mode = 1;
-}
-
-static void exciter8_tilde_freq(t_exciter8_tilde *x, t_floatarg f){ if (f>0) x->note_hz = f; }
-static void exciter8_tilde_seed(t_exciter8_tilde *x, t_floatarg s){ uint32_t v=(uint32_t)(s<=0?1:s); x->rng=v; }
-static void exciter8_tilde_hp  (t_exciter8_tilde *x, t_floatarg hz){
-    float h = CLAMP(hz, 1.f, 60.f);
-    dc_set_coeff(x, h);
-}
-
-static void exciter8_tilde_bang(t_exciter8_tilde *x){ // alias: noteon 1
-    exciter8_tilde_noteon(x, 1.f);
-}
-
-/* ---------- new/free ---------- */
-static void *exciter8_tilde_new(void){
-    t_exciter8_tilde *x = (t_exciter8_tilde *)pd_new(exciter8_tilde_class);
-
-    x->sr = sys_getsr(); if (x->sr <= 0) x->sr = 44100.f;
-
-    // defaults
-    x->p_attack_ms  = 10.f;
-    x->p_decay_ms   = 100.f;
-    x->p_sustain    = 0.7f;
-    x->p_rel_
+    float
