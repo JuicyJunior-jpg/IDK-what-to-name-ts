@@ -4,7 +4,7 @@
 #include <string.h>
 
 /*  exciter8~ — velocity-aware stereo exciter (final)
-    Inlets (1–9, left to right):
+    Inlets (1–9, left→right):
       1  [message inlet]: noteon <vel>, noteoff, mode impulse|dc, freq <Hz>, seed <u32>, hp <Hz>, bang
       2  Attack (ms)
       3  Decay (ms)
@@ -13,7 +13,7 @@
       6  Hardness (0..1)
       7  Brightness (0..1)  // 0=LP, 0.5=neutral, 1=HP
       8  Click Amount (0..1)
-      9  EnvToFilter Depth (0..1)
+      9  Env→Filter Depth (0..1)
 
     Outlets: L, R audio
     License: MIT
@@ -183,13 +183,9 @@ static t_int *exciter8_tilde_perform(t_int *w){
 
         float col = w_lp*lp_branch + w_dry*dry_branch + w_hp*hp_branch;
 
-        /* tiny stereo decorrelation */
-        float addL = 0.02f * white01(&x->rng);
-        float addR = 0.02f * white01(&x->rng);
-
-        /* DC block + safety */
-        float yL = dc_hp(col + addL, &x->dc_xL, &x->dc_yL, x->dc_a);
-        float yR = dc_hp(col + addR, &x->dc_xR, &x->dc_yR, x->dc_a);
+        /* DC block + soft safety (inline tiny decorrelation) */
+        float yL = dc_hp(col + 0.02f * white01(&x->rng), &x->dc_xL, &x->dc_yL, x->dc_a);
+        float yR = dc_hp(col + 0.02f * white01(&x->rng), &x->dc_xR, &x->dc_yR, x->dc_a);
 
         outL[i] = tanh_fast(yL * 1.2f);
         outR[i] = tanh_fast(yR * 1.2f);
